@@ -1,0 +1,8 @@
+development:
+  adapter: postgis
+  postgis_extension: true
+  schema_search_path: public
+  host: localhost
+  database: my_db   # Substitute with your database name
+  username: dbuser  # Substitute with your database user.  Make sure the user has the required privileges.
+  password: s3cr3t  # Substitute with the password for your database user.

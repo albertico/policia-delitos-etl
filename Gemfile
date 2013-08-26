@@ -1,0 +1,6 @@
+source 'http://rubygems.org'
+gem 'pg'
+gem 'activerecord-postgis-adapter', '= 0.6.4'
+gem 'rgeo'
+gem 'rgeo-shapefile'
+gem 'rgeo-activerecord', '= 0.5.0'
