@@ -27,20 +27,26 @@ module Policia
       #    - POINT_X => Float
       #    - POINT_Y => Float
       def self.transform_and_load_shapefile(shapefile, srid)
+        # Validate SRID not nil.
         raise "Error processing shapefile: SRID must be specified" unless srid
         # Load proj4 EPSG data file on system.
         epsg = RGeo::CoordSys::SRSDatabase::Proj4Data.new('epsg')
-        # Create factory for specified SRID using proj4 defined on EPSG data file.
+        # Validate that SRID exists on EPSG data file.
         raise "Error processing shapefile: Unknown SRID #{srid}" unless epsg.get(srid)
+        # Create factory for specified SRID using proj4 defined on EPSG data file.
         srid_factory = RGeo::Cartesian.factory(:srid => srid, :proj4 => epsg.get(srid).proj4)
         # Create WGS84 factory.
         wgs84_factory = RGeo::Geographic.spherical_factory(:srid => 4326, :proj4 => epsg.get(4326).proj4)
         # Do ETL for each shapefile feature.
         RGeo::Shapefile::Reader.open(shapefile, :srid => srid, :factory => srid_factory) do |shp|
+          # Validate shape type code and attributes.
           raise "Error processing shapefile: Shape not of Point type (1)" unless shp.shape_type_code == 1
           raise "Error processing shapefile: Attributes not available" unless shp.attributes_available?
+          # Output number of records for debugging purposes.
           puts "File '#{shapefile}' contains #{shp.size} records."
+          # Enclose ETL process into model transaction in order to guarantee data consistency if exception is raised.
           Policia::Delitos::Model.transaction do
+            # Do ETL!
             shp.each do |feature|
               delito_incidente = Policia::Delitos::Model.new do |record|
                 # :object_id -- OBJECTID
@@ -50,17 +56,18 @@ module Policia
                 record.delito = delito
                 # :delito_description -- Use Helper module
                 record.delito_description = Policia::Delitos::ETL::Helper.get_delito_description(delito)
-                # :delito_datetime -- fecha_ocur + hora_ocurr (no timezone data is stored on database)
+                # :delito_datetime -- fecha_ocur + hora_ocurr (no timezone data is stored in database)
                 feature_datetime = DateTime.parse("#{feature.attributes['fecha_ocur'].iso8601}T#{feature.attributes['hora_ocurr']}")
                 record.delito_datetime = feature_datetime
-                # :delito_year, :delito_month, :delito_day, :delito_time
+                # :delito_date, :delito_time, :delito_year, :delito_month, :delito_day
+                record.delito_date = feature_datetime.to_date
+                record.delito_time = feature_datetime.to_time
                 record.delito_year = feature_datetime.to_date.year
                 record.delito_month = feature_datetime.to_date.month
                 record.delito_day = feature_datetime.to_date.day
-                record.delito_time = feature_datetime.to_time
                 # :geom -- reprojected point (WGS84)
                 record.geom = RGeo::Feature.cast(feature.geometry, :factory => wgs84_factory, :project => true)
-                # Output ID and geometries for debugging purposes.
+                # Output ID, SRID and geometries for debugging purposes.
                 puts "[#{record.object_id}] SRID:#{srid} #{feature.geometry} => #{record.geom}"
               end
               delito_incidente.save
@@ -68,7 +75,7 @@ module Policia
           end
         end
       end
-
+      
       module Helper
         def self.get_delito_description(delito)
           case delito
@@ -95,10 +102,11 @@ module Policia
           t.integer :delito
           t.string :delito_description
           t.datetime :delito_datetime
+          t.date :delito_date
+          t.time :delito_time
           t.integer :delito_year
           t.integer :delito_month
           t.integer :delito_day
-          t.time :delito_time
           t.point :geom, :geographic => true # By default, PostGIS Geography datatypes have SRID 4326 (WGS84).
           # Indexes
           t.index :object_id, :unique => true
