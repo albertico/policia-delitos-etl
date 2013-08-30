@@ -78,7 +78,7 @@ module Policia
               # Output ID, SRID and geometries for debugging purposes.
               puts "[#{record.new_record? ? "N" : "U"}] [#{record.object_id}] SRID:#{feature.geometry.srid} #{feature.geometry} => SRID:#{record.geom.srid} #{record.geom}"
               # Increase counters.
-              (record.new_record? ? new_records += 1 : updated_records += 1)
+              record.new_record? ? new_records += 1 : updated_records += 1
               # Save record!
               record.save
             end
