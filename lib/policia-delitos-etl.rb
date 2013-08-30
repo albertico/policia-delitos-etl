@@ -47,8 +47,8 @@ module Policia
           # Enclose ETL process into model transaction in order to guarantee data consistency if exception is raised.
           Policia::Delitos::Model.transaction do
             if force_delete
-              Policia::Delitos::Model.delete_all
               puts "Deleting ALL existing records"
+              Policia::Delitos::Model.delete_all
             end
             # Do ETL!
             puts "Traversing shapfile features..."
