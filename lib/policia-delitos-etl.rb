@@ -51,7 +51,7 @@ module Policia
               Policia::Delitos::Model.delete_all
             end
             # Do ETL!
-            puts "Traversing shapfile features..."
+            puts "Traversing shapefile features..."
             new_records = 0
             updated_records = 0
             shp.each do |feature|
