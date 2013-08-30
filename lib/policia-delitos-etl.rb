@@ -26,7 +26,7 @@ module Policia
       #    - FK_delito_ => Fixnum
       #    - POINT_X => Float
       #    - POINT_Y => Float
-      def self.transform_and_load_shapefile(shapefile, srid)
+      def self.transform_and_load_shapefile(shapefile, srid, force_delete=true)
         # Validate SRID not nil.
         raise "Error processing shapefile: SRID must be specified" unless srid
         # Load proj4 EPSG data file on system.
@@ -43,35 +43,45 @@ module Policia
           raise "Error processing shapefile: Shape not of Point type (1)" unless shp.shape_type_code == 1
           raise "Error processing shapefile: Attributes not available" unless shp.attributes_available?
           # Output number of records for debugging purposes.
-          puts "File '#{shapefile}' contains #{shp.size} records."
+          puts "Shapefile contains #{shp.size} records."
           # Enclose ETL process into model transaction in order to guarantee data consistency if exception is raised.
           Policia::Delitos::Model.transaction do
-            # Do ETL!
-            shp.each do |feature|
-              delito_incidente = Policia::Delitos::Model.new do |record|
-                # :object_id -- OBJECTID
-                record.object_id = feature.attributes['OBJECTID'].to_i
-                # :delito -- FK_delito_
-                delito = feature.attributes['FK_delito_'].to_i
-                record.delito = delito
-                # :delito_description -- Use Helper module
-                record.delito_description = Policia::Delitos::ETL::Helper.get_delito_description(delito)
-                # :delito_datetime -- fecha_ocur + hora_ocurr (no timezone data is stored in database)
-                feature_datetime = DateTime.parse("#{feature.attributes['fecha_ocur'].iso8601}T#{feature.attributes['hora_ocurr']}")
-                record.delito_datetime = feature_datetime
-                # :delito_date, :delito_time, :delito_year, :delito_month, :delito_day
-                record.delito_date = feature_datetime.to_date
-                record.delito_time = feature_datetime.to_time
-                record.delito_year = feature_datetime.to_date.year
-                record.delito_month = feature_datetime.to_date.month
-                record.delito_day = feature_datetime.to_date.day
-                # :geom -- reprojected point (WGS84)
-                record.geom = RGeo::Feature.cast(feature.geometry, :factory => wgs84_factory, :project => true)
-                # Output ID, SRID and geometries for debugging purposes.
-                puts "[#{record.object_id}] SRID:#{srid} #{feature.geometry} => #{record.geom}"
-              end
-              delito_incidente.save
+            if force_delete
+              Policia::Delitos::Model.delete_all
+              puts "Deleting ALL existing records"
             end
+            # Do ETL!
+            puts "Traversing shapfile features..."
+            new_records = 0
+            updated_records = 0
+            shp.each do |feature|
+              delito_attr = {}
+              # :object_id -- OBJECTID
+              delito_attr['object_id'] = feature.attributes['OBJECTID'].to_i
+              # :delito -- FK_delito_
+              delito_attr['delito'] = feature.attributes['FK_delito_'].to_i
+              # :delito_description -- Use Helper module
+              delito_attr['delito_description'] = Policia::Delitos::ETL::Helper.get_delito_description(delito_attr['delito'])
+              # :delito_datetime -- fecha_ocur + hora_ocurr (no timezone data is stored in database)
+              delito_attr['delito_datetime'] = DateTime.parse("#{feature.attributes['fecha_ocur'].iso8601}T#{feature.attributes['hora_ocurr']}")
+              # :delito_date, :delito_time, :delito_year, :delito_month, :delito_day
+              delito_attr['delito_date'] = delito_attr['delito_datetime'].to_date
+              delito_attr['delito_time'] = delito_attr['delito_datetime'].to_time
+              delito_attr['delito_year'] = delito_attr['delito_datetime'].to_date.year
+              delito_attr['delito_month'] = delito_attr['delito_datetime'].to_date.month
+              delito_attr['delito_day'] = delito_attr['delito_datetime'].to_date.day
+              # :geom -- reprojected point (WGS84)
+              delito_attr['geom'] = RGeo::Feature.cast(feature.geometry, :factory => wgs84_factory, :project => true)
+              # Create or find existing record
+              record = (force_delete ? nil : Policia::Delitos::Model.find_by(object_id: delito_attr['object_id'])) || Policia::Delitos::Model.new
+              record.attributes = delito_attr
+              # Output ID, SRID and geometries for debugging purposes.
+              puts "[#{record.new_record? ? "N" : "U"}] [#{record.object_id}] SRID:#{feature.geometry.srid} #{feature.geometry} => SRID:#{record.geom.srid} #{record.geom}"
+              (record.new_record? ? new_records += 1 : updated_records += 1)
+              # Save record!
+              record.save
+            end
+            puts "TOTAL: #{shp.size}  [N] => #{new_records}  [U] => #{updated_records}"
           end
         end
       end
